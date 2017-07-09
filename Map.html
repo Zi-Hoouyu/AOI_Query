@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="initial-scale=1, maximum-scale=1,user-scalable=no">
+    <title>Geoprocessing - Export result as map service</title>
+    <link rel="stylesheet" href="https://js.arcgis.com/3.21/dijit/themes/tundra/tundra.css">
+    <link rel="stylesheet" href="https://js.arcgis.com/3.21/esri/css/esri.css">
+    <style>
+      html, body { height: 100%; width: 100%; margin: 0; padding: 0; }
+      h3 { margin: 0 0 5px 0; border-bottom: 1px solid #444; }
+      .shadow {
+        -moz-box-shadow: 0 0 5px #888;
+        -webkit-box-shadow: 0 0 5px #888;
+        box-shadow: 0 0 5px #888;
+      }
+      #map{ margin: 0; padding: 0; }
+      #leftPanel {
+        margin:5px;
+        background: #fff;
+        color: #444;
+        font-family: arial;
+        width: 250px;
+        border-right: solid 1px #888;
+      }
+      #footer{
+        border-top: solid 1px #888;
+        height:55px;
+      }
+
+      #status{
+        background-color:#E0E0E0; 
+        color: #707070; 
+        font-weight:bold;
+        padding: 3px; 
+        border: solid 1px #707070;
+        -moz-border-radius: 5px;
+        -webkit-border-radius: 5px;    
+        border-radius:5px;
+        position:absolute;
+        top:50%;
+        right:50%;
+        z-index:100;
+        display:none;
+        height:20px;
+      }
+    </style>
+
+    <script src="https://js.arcgis.com/3.21/"></script>
+    <script>
+      var app;
+
+      require(["dojo/dom",
+          "dojo/_base/array",
+          "dojo/date/locale",
+          "dojo/parser",
+          "dijit/registry",
+
+          "esri/domUtils",
+          "esri/map",
+          "esri/graphic",
+          "esri/layers/ArcGISDynamicMapServiceLayer",
+          "esri/layers/FeatureLayer",
+          "esri/tasks/Geoprocessor",
+          "esri/dijit/Legend",
+		  "esri/dijit/FeatureTable",
+
+          "dijit/form/DateTextBox",
+          "dijit/layout/BorderContainer",
+          "dijit/layout/ContentPane",
+			  "esri/InfoTemplate",
+			  "esri/lang",
+			  "esri/dijit/Popup"],
+    function(dom, array, locale, parser, registry,
+             domUtils, Map, Graphic, ArcGISDynamicMapServiceLayer, FeatureLayer, Geoprocessor, Legend,FeatureTable,InfoTemplate,esriLang){
+      
+		  //var gpServiceUrl= "http://localhost:6080/arcgis/rest/services/newquery/GPServer/newquery";
+		  //var gp = new Geoprocessor(gpServiceUrl);
+		  
+		  var gpServiceUrl;
+		  var gp;
+		  var legend;//用于显示图例
+		  
+		  parser.parse();
+		  
+		  //加载底图
+		  var map = new Map("map",{
+			  basemap: "streets", 
+			  zoom:6,
+			  extent: new esri.geometry.Extent(
+		   		{xmax: 1.6936337667068616E7, xmin:  1.1094325983045243E7,
+				 ymax:6705051.141965883, ymin: 3079193.8902513776,
+				 "spatialReference":{"wkid":102100,"latestWkid":3857}
+				})
+		  });
+		  //系统已启动，就显示监测点
+		  map.on("load", show_place);
+
+          //监测点图层
+		  var location=new esri.layers.FeatureLayer("https://services8.arcgis.com/vw5fdrfiTC1f5AO6/arcgis/rest/services/location/FeatureServer/0",{
+              mode: esri.layers.FeatureLayer.MODE_ONDEMAND,
+              outFields: ["*"],
+              visible: true,
+              id: "fLayer"
+              });
+		  
+		  //加载featureTable属性表
+		  var myFeatureTable = new esri.dijit.FeatureTable({
+             	featureLayer :location,
+				 map : map,
+				 syncSelection: true,//是否启用map和featuretable之间的交互
+				 zoomToSelection: true,
+				 gridOptions: {
+					 allowSelectAll: true,
+					 allowTextSelection: true,},
+				 outFields: ["*"],
+			 }, 'myTableNode');
+		  
+		  function show_place()
+		  {	 //显示全国监测点
+			  console.log("显示地点");
+			  cleanup();
+			  
+			 //设置渲染
+			 var orangeRed = new esri.Color([238, 69, 0, 0.5]); // hex is #ff4500
+		 	 var marker = new esri.symbol.SimpleMarkerSymbol("solid", 10, null, orangeRed);
+			 var renderer = new esri.renderer.SimpleRenderer(marker);
+
+			 location.setRenderer(renderer);
+			 map.addLayer(location);
+			 myFeatureTable.startup();
+		  }
+
+		  function gpJobComplete(jobinfo){
+			  //get the result map service layer and add to map
+			  gp.getResultImageLayer(jobinfo.jobId, null, null, function(layer){
+				  layer.setOpacity(0.7);
+				  map.addLayers([layer]);
+			  });
+		  //查询图层改变后，图层的改变
+			  map.on("layers-add-result", function(evtObj) {
+			  console.log("layers-add-result");
+           	  domUtils.show(dom.byId('legendDiv'));          
+			  if( !legend ) { 
+                //添加图例
+				var layerInfo = array.map(evtObj.layers, function(layer,index){
+					return {
+						layer: layer.layer,
+						title: layer.layer.name
+					};
+				});          
+              legend = new Legend({
+                	map: map,
+                	layerInfos: layerInfo
+		    	},"legendDiv");
+             legend.startup();
+          }
+        });
+      }      
+		  function gpJobStatus(jobinfo){
+			  var jobstatus = '';
+			  switch (jobinfo.jobStatus) {
+				  case 'esriJobSubmitted':
+					  jobstatus = 'Submitted...';
+					  console.log(jobstatus);
+					  break;
+				  case 'esriJobExecuting':
+					  jobstatus = 'Executing...';
+					  console.log(jobstatus);
+					  break;
+				  case 'esriJobSucceeded':
+					  console.log(jobstatus);
+					  break;
+			  }
+        	dom.byId('status').innerHTML = jobstatus;
+		  }
+		  function gpJobFailed(error){
+           console.log("error!");
+      }  
+		  function buildDefinitionQuery(){
+		  var defQuery;
+		  //获取查询条件
+		  var chooseDate=document.getElementById("dateList").value;
+		  var choosehour=document.getElementById("hourList").value;
+		  var choosetype=document.getElementById("type").value;
+		  var def = [];
+		  def.push("(date = '" + chooseDate + "')");            
+          def.push("(hour = '"+choosehour+"' )");
+		  def.push("(type = '" + choosetype + "')");             
+		  if (def.length > 1) {
+            defQuery = def.join(" AND ");
+		  }   
+		  console.log(defQuery);
+		  return defQuery;
+      	}
+      
+		  function cleanup(){
+        //hide the legend and remove the existing hotspot layer
+        domUtils.hide(dom.byId('legendDiv'));
+		 //监测点图层的隐藏
+		var placeLayer = map.getLayer('fLayer');
+        if(placeLayer){
+          map.removeLayer(placeLayer);
+			}
+		 //隐藏查询图层
+		var queryLayer = map.getLayer('queryLayer');
+        if(queryLayer){
+          map.removeLayer(queryLayer);
+			}	 
+	 }
+	
+		  function query_onclick()
+		  {
+			  //污染查询的函数
+			  console.log("污染查询");
+			  cleanup();//删除原来的查询图层
+			
+			  var mystring=[];
+			  mystring=buildDefinitionQuery();
+			  console.log("%s",mystring);
+		 
+			  var pollutionLayer;
+		  	  var temptype=document.getElementById("type").value;
+			  //根据不同的污染类型，不同的服务以返回不同的地图
+			    switch (temptype) {
+				  case 'AQI':
+					  gpServiceUrl= "http://localhost:6080/arcgis/rest/services/newquery/GPServer/newquery";
+					  //pollutionLayer = new ArcGISDynamicMapServiceLayer("http://localhost:6080/arcgis/rest/services/newquery3/MapServer", {"opacity": 0.75,id: "queryLayer" });
+					  break;
+				  case 'CO':
+					  gpServiceUrl= "http://localhost:6080/arcgis/rest/services/newquery222/GPServer/newquery";
+					  //pollutionLayer = new ArcGISDynamicMapServiceLayer("http://localhost:6080/arcgis/rest/services/newquery22222222/MapServer", {"opacity": 0.75,id: "queryLayer" });
+					  break;
+				  case 'O3':
+					  alert("抱歉，该污染类型目前还未实现");
+						console.log("haimeiyou");
+					  break;
+				  case 'SO2':
+					  alert("抱歉，该污染类型目前还未实现");
+						console.log("haimeiyou");
+					  break;
+				  case 'PM2.5':
+					  alert("抱歉，该污染类型目前还未实现");
+						console.log("haimeiyou");
+					  break;
+			      }
+			 // map.addLayer(pollutionLayer);
+			  gp = new Geoprocessor(gpServiceUrl);
+			  var params = {
+				  表达式: buildDefinitionQuery()
+			  };
+			  gp.submitJob(params, gpJobComplete, gpJobStatus, gpJobFailed);
+		  }
+		  app = {
+			query_onclick:query_onclick,
+			show_place:show_place
+		  };	  
+    });
+
+    </script>
+  </head>
+
+<body class="tundra">
+  <div data-dojo-type="dijit.layout.BorderContainer"
+       data-dojo-props="design:'headline',gutters:false"
+       style="width: 100%; height: 100%; margin: 0;">
+
+    <div id="map" data-dojo-type="dijit.layout.ContentPane" data-dojo-props="region:'center'">
+      <span id="status" style="position:absolute;bottom:5px;"></span> 
+    </div>
+    
+    <div id="leftPanel" data-dojo-type="dijit.layout.ContentPane" data-dojo-props="region:'left'">
+      <div id="info" style="padding-left: 20px;">
+        <div style="padding-bottom:20px;padding-left: 20px;width:40px">
+           <div style="padding-bottom:20px;width:40px">
+         <label for="dateList">日期:</label>
+         <select id="dateList"> 
+           <option value="20170613">2017年6月13日</option> 
+           <option value="20170614">2017年6月14日</option> 
+           <option value="20170615">2017年6月15日</option> 
+           <option value="20170616">2017年6月16日</option> 
+           <option value="20170617">2017年6月17日</option> 
+         </select> 
+
+          <label for="hourList">小时:</label>
+          <select id="hourList"> 
+           <option value="0">0</option> 
+           <option value="1">1</option> 
+           <option value="2">2</option> 
+           <option value="3">3</option> 
+           <option value="4">4</option> 
+            <option value="5">5</option> 
+           <option value="6">6</option> 
+           <option value="7">7</option> 
+           <option value="8">8</option> 
+           <option value="9">9</option> 
+            <option value="10">10</option> 
+           <option value="11">11</option> 
+           <option value="12">12</option> 
+           <option value="13">13</option> 
+           <option value="14">14</option> 
+            <option value="15">15</option> 
+           <option value="16">16</option> 
+           <option value="17">17</option> 
+           <option value="18">18</option> 
+           <option value="19">19</option> 
+            <option value="20">20</option> 
+           <option value="21">21</option> 
+           <option value="22">22</option> 
+           <option value="23">23</option> 
+         </select> 
+         <label for="type">污染类型:</label>
+          <select id="type"> 
+           <option value="AQI">AQI</option> 
+           <option value="CO">CO</option> 
+           <option value="O3">O3</option> 
+           <option value="SO2">SO2</option> 
+           <option value="PM2.5">PM2.5</option> 
+         </select>     
+           
+        </div>
+        
+       
+        </div>
+
+        <div align="center">
+          <button  id="query_onclick" onclick="app.query_onclick();">查询污染状况</button>
+          <button  id="show_place" onclick="app.show_place();">显示全国监测点</button>
+        </div>
+      </div>
+      
+      <div id="legendDiv" style="display:none;margin-top:15px;"></div>
+    </div>
+    
+    <div id="bot" data-dojo-type="dijit/layout/ContentPane" data-dojo-props="region:'bottom', splitter:true" style="height:30%;width:auto;">
+        <div id="myTableNode"></div>
+    </div>
+  </div>
+</body>
+</html>
+
